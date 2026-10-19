@@ -25,16 +25,15 @@ func parseBytes(s string) ([]byte, error) {
 	})
 	data := make([]byte, len(tokens))
 	for i, token := range tokens {
-		base, digits := 10, token
+		base := 10
 		if len(token) >= 2 {
 			switch token[:2] {
-			case "0x", "0X":
-				base, digits = 16, token[2:]
-			case "0b", "0B":
-				base, digits = 2, token[2:]
+			case "0x", "0X", "0b", "0B":
+				// 基数0では、Goの整数リテラルに従って_の位置も検証する。
+				base = 0
 			}
 		}
-		value, err := strconv.ParseUint(digits, base, 8)
+		value, err := strconv.ParseUint(token, base, 8)
 		if err != nil {
 			if errors.Is(err, strconv.ErrRange) {
 				return nil, fmt.Errorf("%d番目の値 %q が1バイトの範囲（0〜255）を超えています", i+1, token)
