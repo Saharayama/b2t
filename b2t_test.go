@@ -100,7 +100,7 @@ func TestParseBytesErrors(t *testing.T) {
 	}
 }
 
-func TestTextToHex(t *testing.T) {
+func TestTextToNumbersHex(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
@@ -116,20 +116,57 @@ func TestTextToHex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := textToHex(tt.input)
+			got, err := textToNumbers(tt.input, 16)
 			if err != nil {
-				t.Fatalf("textToHex(%q): unexpected error: %v", tt.input, err)
+				t.Fatalf("textToNumbers(%q, 16): unexpected error: %v", tt.input, err)
 			}
 			if got != tt.want {
-				t.Errorf("textToHex(%q) = %q, want %q", tt.input, got, tt.want)
+				t.Errorf("textToNumbers(%q, 16) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestTextToHexInvalidUTF8(t *testing.T) {
-	if got, err := textToHex(string([]byte{0xff})); err == nil {
-		t.Errorf("textToHex(invalid UTF-8) = %q, want error", got)
+func TestTextToNumbers(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		base  int
+		want  string
+	}{
+		{"binary_ascii", "AB", 2, "0b01000001 0b01000010"},
+		{"decimal_ascii", "AB", 10, "65 66"},
+		{"binary_japanese", "あ", 2, "0b11100011 0b10000001 0b10000010"},
+		{"decimal_japanese", "あ", 10, "227 129 130"},
+		{"binary_emoji", "😀", 2, "0b11110000 0b10011111 0b10011000 0b10000000"},
+		{"decimal_emoji", "😀", 10, "240 159 152 128"},
+		{"binary_space_and_newline", "A \n", 2, "0b01000001 0b00100000 0b00001010"},
+		{"decimal_space_and_newline", "A \n", 10, "65 32 10"},
+		{"binary_nul", "\x00", 2, "0b00000000"},
+		{"decimal_nul", "\x00", 10, "0"},
+		{"binary_empty", "", 2, ""},
+		{"decimal_empty", "", 10, ""},
+		{"decimal_digit_widths", "\x01\x0a\x64", 10, "1 10 100"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := textToNumbers(tt.input, tt.base)
+			if err != nil || got != tt.want {
+				t.Errorf("textToNumbers(%q, %d) = (%q, %v), want %q", tt.input, tt.base, got, err, tt.want)
+			}
+		})
+	}
+	for _, base := range []int{2, 10, 16} {
+		if got, err := textToNumbers(string([]byte{0xff}), base); err == nil {
+			t.Errorf("textToNumbers(invalid UTF-8, %d) = %q, want error", base, got)
+		}
+	}
+	for _, base := range []int{0, 8, -1, 36} {
+		for _, input := range []string{"", "A"} {
+			if got, err := textToNumbers(input, base); err == nil {
+				t.Errorf("textToNumbers(%q, %d) = %q, want error", input, base, got)
+			}
+		}
 	}
 }
 
@@ -210,7 +247,62 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("parseArgs(%q) = (reverse=%t, inputs=%q), want (reverse=%t, inputs=%q)",
 					tt.args, opts.reverse, inputs, tt.wantReverse, tt.wantInputs)
 			}
+			if opts.base != 16 {
+				t.Errorf("default base = %d, want 16", opts.base)
+			}
 		})
+	}
+}
+
+func TestParseArgsOutputBase(t *testing.T) {
+	for _, choice := range []struct {
+		base  int
+		short string
+		long  string
+	}{{2, "b", "bin"}, {10, "d", "dec"}, {16, "x", "hex"}} {
+		for _, args := range [][]string{
+			{"-r", "-" + choice.short, "AB"},
+			{"--reverse", "--" + choice.long, "AB"},
+			{"--" + choice.long, "AB", "-r"},
+			{"-r" + choice.short, "AB"},
+			{"-" + choice.short + "r", "AB"},
+			{"AB", "-r" + choice.short},
+			{"-r", "-" + choice.short, "--" + choice.long, "AB"},
+			{"-r" + choice.short + choice.short, "AB"},
+		} {
+			opts, inputs, err := parseArgs(args)
+			if err != nil || !opts.reverse || opts.base != choice.base || !equalStrings(inputs, []string{"AB"}) {
+				t.Errorf("parseArgs(%q) = (%+v, %q, %v), want reverse, base %d, input AB", args, opts, inputs, err, choice.base)
+			}
+		}
+	}
+	for _, args := range [][]string{
+		{"-b", "AB"}, {"--dec", "AB"}, {"-x", "AB"},
+		{"-rbd", "AB"}, {"-rdx", "AB"}, {"-rxb", "AB"},
+		{"-r", "--bin", "--hex", "--bin", "AB"},
+		{"-r", "--dec", "--bin", "AB"},
+		{"-rb2", "AB"}, {"-r", "--bi", "AB"},
+		{"-r", "--base", "2", "AB"},
+		{"-rb", "A", "B"}, {"-rz", "AB"},
+	} {
+		if _, _, err := parseArgs(args); err == nil {
+			t.Errorf("parseArgs(%q) should fail", args)
+		}
+	}
+	for _, name := range []string{"r", "reverse", "x", "hex", "d", "dec", "b", "bin", "h", "help", "rb"} {
+		for _, prefix := range []string{"-", "--"} {
+			for _, value := range []string{"true", "false", "1", "0", "", "2"} {
+				arg := prefix + name + "=" + value
+				if _, _, err := parseArgs([]string{"-r", arg, "AB"}); err == nil || errors.Is(err, flag.ErrHelp) {
+					t.Errorf("parseArgs with %q should reject option values, got %v", arg, err)
+				}
+			}
+		}
+	}
+	for _, args := range [][]string{{"-reverse", "AB"}, {"--r", "AB"}} {
+		if opts, _, err := parseArgs(args); err != nil || !opts.reverse {
+			t.Errorf("existing alias %q failed: %v", args, err)
+		}
 	}
 }
 
@@ -293,6 +385,22 @@ func TestRun(t *testing.T) {
 		{"invalid_underscore_stdin", nil, "0b01_\n", 1, "", "不正"},
 		{"reverse_args", []string{"--reverse", "あ"}, "", 0, "0xE3 0x81 0x82\n", ""},
 		{"reverse_stdin", []string{"-r"}, "ABC\r\n", 0, "0x41 0x42 0x43\n", ""},
+		{"reverse_hex", []string{"-rx", "AB"}, "", 0, "0x41 0x42\n", ""},
+		{"reverse_binary", []string{"-rb", "AB"}, "", 0, "0b01000001 0b01000010\n", ""},
+		{"reverse_decimal", []string{"--reverse", "--dec", "AB"}, "", 0, "65 66\n", ""},
+		{"reverse_binary_stdin", []string{"-br"}, "あ\r\n", 0, "0b11100011 0b10000001 0b10000010\n", ""},
+		{"reverse_decimal_stdin", []string{"-rd"}, "😀\n", 0, "240 159 152 128\n", ""},
+		{"reverse_binary_empty", []string{"-rb", ""}, "ignored", 0, "\n", ""},
+		{"reverse_decimal_empty", []string{"-rd"}, "", 0, "\n", ""},
+		{"reverse_numeric_text", []string{"-rb", "2"}, "", 0, "0b00110010\n", ""},
+		{"reverse_false_text", []string{"-r", "false"}, "", 0, "0x66 0x61 0x6C 0x73 0x65\n", ""},
+		{"literal_flag_text", []string{"-rd", "--", "-r=false"}, "", 0, "45 114 61 102 97 108 115 101\n", ""},
+		{"literal_cluster_text", []string{"-rd", "--", "-rb2"}, "", 0, "45 114 98 50\n", ""},
+		{"base_requires_reverse", []string{"--bin", "AB"}, "", 2, "", "--reverseが必要"},
+		{"conflicting_bases", []string{"-rbd", "AB"}, "", 2, "", "いずれか1つ"},
+		{"reverse_flag_value", []string{"-r=false", "65"}, "", 2, "", "値を取りません"},
+		{"invalid_attached_base", []string{"-rb2", "AB"}, "", 2, "", "エラー:"},
+		{"binary_invalid_utf8", []string{"-rb", string([]byte{0xff})}, "", 1, "", "UTF-8"},
 		{"empty_input", nil, "", 0, "\"\"\n", ""},
 		{"invalid_number", []string{"256"}, "", 1, "", "範囲"},
 		{"invalid_utf8_bytes", []string{"0xFF"}, "", 1, "", "UTF-8"},
@@ -318,11 +426,11 @@ func TestRun(t *testing.T) {
 }
 
 func TestRunHelp(t *testing.T) {
-	for _, arg := range []string{"-h", "--help"} {
+	for _, arg := range []string{"-h", "--help", "-rh", "-rbh"} {
 		t.Run(arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := run([]string{arg}, strings.NewReader(""), &stdout, &stderr)
-			if code != 0 || !strings.Contains(stdout.String(), "Usage: b2t") || stderr.Len() != 0 {
+			if code != 0 || !strings.Contains(stdout.String(), "Usage: b2t") || !strings.Contains(stdout.String(), "--bin") || stderr.Len() != 0 {
 				t.Errorf("help: code=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
 		})
@@ -353,28 +461,30 @@ func TestRunIOErrors(t *testing.T) {
 	})
 }
 
-// 任意の有効なUTF-8テキストがテキスト → 16進数バイト列 → テキストの往復で失われないことを確認する。
+// 任意の有効なUTF-8テキストが各基数のバイト列との往復で失われないことを確認する。
 func FuzzRoundTrip(f *testing.F) {
 	for _, seed := range []string{"", "ABC", "あいうえお", "😀", "A\x00B", "A\r\nB", string([]byte{0xff})} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, input string) {
-		hex, err := textToHex(input)
-		if !utf8.ValidString(input) {
-			if err == nil {
-				t.Errorf("textToHex accepted invalid UTF-8 input %q", input)
+		for _, base := range []int{2, 10, 16} {
+			numbers, err := textToNumbers(input, base)
+			if !utf8.ValidString(input) {
+				if err == nil {
+					t.Errorf("textToNumbers accepted invalid UTF-8 input %q", input)
+				}
+				continue
 			}
-			return
-		}
-		if err != nil {
-			t.Fatalf("textToHex(%q): %v", input, err)
-		}
-		data, err := parseBytes(hex)
-		if err != nil {
-			t.Fatalf("parseBytes(%q): %v", hex, err)
-		}
-		if got := string(data); got != input {
-			t.Errorf("round trip = %q, want %q", got, input)
+			if err != nil {
+				t.Fatalf("textToNumbers(%q, %d): %v", input, base, err)
+			}
+			data, err := parseBytes(numbers)
+			if err != nil {
+				t.Fatalf("parseBytes(%q): %v", numbers, err)
+			}
+			if got := string(data); got != input {
+				t.Errorf("round trip = %q, want %q", got, input)
+			}
 		}
 	})
 }
@@ -385,7 +495,7 @@ func BenchmarkTextToHex(b *testing.B) {
 	b.SetBytes(int64(len(input)))
 	b.ReportAllocs()
 	for b.Loop() {
-		if _, err := textToHex(input); err != nil {
+		if _, err := textToNumbers(input, 16); err != nil {
 			b.Fatal(err)
 		}
 	}
