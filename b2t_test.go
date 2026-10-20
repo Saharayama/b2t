@@ -430,7 +430,7 @@ func TestRunHelp(t *testing.T) {
 		t.Run(arg, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := run([]string{arg}, strings.NewReader(""), &stdout, &stderr)
-			if code != 0 || !strings.Contains(stdout.String(), "Usage: b2t") || !strings.Contains(stdout.String(), "--bin") || stderr.Len() != 0 {
+			if code != 0 || !strings.Contains(stdout.String(), "Usage:\n  b2t") || !strings.Contains(stdout.String(), "--bin") || stderr.Len() != 0 {
 				t.Errorf("help: code=%d, stdout=%q, stderr=%q", code, stdout.String(), stderr.String())
 			}
 		})

@@ -191,38 +191,38 @@ func parseArgs(args []string) (options, []string, error) {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `数値のバイト列とUTF-8テキストを相互変換します。
+	fmt.Fprint(w, `数値のバイト列とUTF-8テキストを相互変換します
 
-Usage: b2t [OPTIONS] [BYTE]...
-       b2t --reverse [--hex | --dec | --bin] [TEXT]
-
-Arguments:
-  [BYTE]...  変換するバイト値（0〜255）。異なる基数を混在できます。
-             65 = 10進数 / 0b01000001 = 2進数 / 0x41 = 16進数
-             接頭辞なしは常に10進数。0B / 0X も使用できます。
-             区切りは空白・カンマ・コロン。
-  [TEXT]     変換するテキスト。空白を含む場合は引用符で囲みます。
+Usage:
+  b2t [OPTIONS] [BYTE...]
+  b2t -r [OPTIONS] [TEXT]
 
 Options:
-  -r, --reverse  テキストを数値のバイト列に変換（空白区切り）
-  -x, --hex      16進数で出力（--reverse専用、既定。0x付き大文字2桁）
-  -d, --dec      10進数で出力（--reverse専用、ゼロ埋めなし）
-  -b, --bin      2進数で出力（--reverse専用、0b付き8桁）
-  -h, --help     ヘルプを表示
+  -r, --reverse    テキストをバイト列に変換
+  -h, --help       ヘルプを表示
 
-  異なる出力基数は同時に指定できません。短縮フラグは-rbのように連結可能です。
+Output format:
+  -x, --hex        16進数  0x41        [default]
+  -d, --dec        10進数  65
+  -b, --bin        2進数   0b01000001
+
+  出力形式は -r と併用し、いずれか1つを指定
 
 Input:
-  引数を省略すると、標準入力をEOFまで読み取ります。
+  BYTE    0〜255のバイト値
+          接頭辞なしは10進数、0b付きは2進数、0x付きは16進数
+          空白・カンマ・コロンで区切り、基数の混在も可能
+  TEXT    空白を含む場合は引用符で囲む
+
+  入力を省略すると標準入力から読み取り
 
 Examples:
-  b2t 65 0b01000010 0x43    # "ABC"
-  b2t 0xE3 0x81 0x82        # "あ"
-  b2t --reverse "ABC"       # 0x41 0x42 0x43
+  b2t 65 0b01000010 0x43   # "ABC"
+  b2t 0xE3 0x81 0x82       # "あ"
+  b2t -r "AB"              # 0x41 0x42
   b2t -rb "AB"             # 0b01000001 0b01000010
   b2t -rd "AB"             # 65 66
-  printf '65 66 67' | b2t   # "ABC"
-  b2t --reverse -- "-A"     # 0x2D 0x41
+  printf '65 66 67' | b2t  # "ABC"
 `)
 }
 
